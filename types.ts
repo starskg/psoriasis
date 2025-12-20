@@ -4,12 +4,15 @@ export enum CellType {
   T_CD4 = 'T_CD4',
   T_CD8 = 'T_CD8',
   T_REG = 'T_REG',
+  T_TH17 = 'T_TH17',
   B_PLASMA = 'B_PLASMA',
   B_MEMORY = 'B_MEMORY',
   MACROPHAGE = 'MACROPHAGE',
   DENDRITIC = 'DENDRITIC',
   NK_CELL = 'NK_CELL',
+  NEUTROPHIL = 'NEUTROPHIL',
   ANTIGEN = 'ANTIGEN', // New Trigger
+  ANTIBODY = 'ANTIBODY',
   CYTOKINE = 'CYTOKINE',
   DRUG = 'DRUG'
 }
@@ -104,6 +107,64 @@ export interface Particle {
   isActive?: boolean; // For Immune cells (Activated or Naive)
   hasAntigen?: boolean; // For Dendritic cells (Carrying antigen?)
 }
+
+export const CELL_INFO: Record<CellType, { title: string; description: string; role: string }> = {
+  [CellType.SKIN]: {
+    title: 'Клетка кожи (Кератиноцит)',
+    description: 'Основная клетка эпидермиса. При псориазе они начинают делиться слишком быстро, не успевая созревать.',
+    role: 'Защитный барьер'
+  },
+  [CellType.DENDRITIC]: {
+    title: 'Дендритная клетка',
+    description: 'Антигенпрезентирующая клетка. Она собирает информацию о патогенах и "представляет" её Т-лимфоцитам.',
+    role: 'Разведчик'
+  },
+  [CellType.T_CD4]: {
+    title: 'Т-хелпер',
+    description: 'Главный регулятор иммунного ответа. Координирует работу других клеток через выделение цитокинов.',
+    role: 'Командир'
+  },
+  [CellType.T_CD8]: {
+    title: 'Т-киллер',
+    description: 'Цитотоксический лимфоцит. Его задача — уничтожать зараженные или мутировавшие клетки.',
+    role: 'Спецназ'
+  },
+  [CellType.ANTIBODY]: {
+    title: 'Антитело',
+    description: 'Белки, вырабатываемые B-клетками для нейтрализации антигенов.',
+    role: 'Нейтрализатор'
+  },
+  [CellType.CYTOKINE]: {
+    title: 'Цитокин',
+    description: 'Информационная молекула. С её помощью клетки "общаются" и передают сигнал тревоги на расстоянии.',
+    role: 'Сообщение'
+  },
+  [CellType.ANTIGEN]: {
+    title: 'Антиген',
+    description: 'Любое вещество, которое организм рассматривает как чужеродное и против которого начинает борьбу.',
+    role: 'Мишень'
+  },
+  [CellType.DRUG]: {
+    title: 'Лекарство',
+    description: 'Медикаментозное средство, предназначенное для блокировки воспаления или регуляции иммунитета.',
+    role: 'Терапия'
+  },
+  [CellType.T_REG]: { title: 'Т-регулятор', description: 'Подавляет иммунный ответ.', role: 'Миротворец' },
+  [CellType.B_PLASMA]: { title: 'Плазмоцит', description: 'Производит антитела.', role: 'Завод' },
+  [CellType.B_MEMORY]: { title: 'Клетка памяти', description: 'Запоминает врага.', role: 'Архив' },
+  [CellType.MACROPHAGE]: { title: 'Макрофаг', description: 'Пожирает мусор.', role: 'Утилизатор' },
+  [CellType.NK_CELL]: { title: 'NK-клетка', description: 'Естественный убийца.', role: 'Охотник' },
+  [CellType.T_TH17]: {
+    title: 'Т-хелпер 17 (Th17)',
+    description: 'Особый тип Т-клеток, играющий ключевую роль в развитии псориаза, выделяя ИЛ-17.',
+    role: 'Провокатор'
+  },
+  [CellType.NEUTROPHIL]: {
+    title: 'Нейтрофил',
+    description: 'Клетки, которые первыми прибывают в очаг воспаления. При псориазе образуют микроабсцессы Мунро.',
+    role: 'Пехота'
+  }
+};
 
 export interface SimulationState {
   cytokineLevel: number;

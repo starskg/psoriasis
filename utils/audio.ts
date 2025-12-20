@@ -3,6 +3,8 @@
 class SoundManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private bgMusic: HTMLAudioElement | null = null;
+  private isMusicPlaying: boolean = false;
 
   constructor() {
     try {
@@ -10,27 +12,32 @@ class SoundManager {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0.3; // Master volume
       this.masterGain.connect(this.ctx.destination);
+
+      // Initialize Background Music from public folder (relative path for sub-dir support)
+      this.bgMusic = new Audio('bgmusic.mp3');
+      this.bgMusic.loop = true;
+      this.bgMusic.volume = 0.2;
     } catch (e) {
       console.error('Web Audio API not supported');
     }
   }
 
-  private ensureContext() {
+  private async ensureContext() {
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      await this.ctx.resume();
     }
   }
 
-  playTone(freq: number, type: OscillatorType, duration: number, volume: number = 1) {
+  async playTone(freq: number, type: OscillatorType, duration: number, volume: number = 1) {
     if (!this.ctx || !this.masterGain) return;
-    this.ensureContext();
+    await this.ensureContext();
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
     osc.type = type;
     osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-    
+
     gain.gain.setValueAtTime(volume, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
 
@@ -41,9 +48,9 @@ class SoundManager {
     osc.stop(this.ctx.currentTime + duration);
   }
 
-  playNoise(duration: number) {
+  async playNoise(duration: number) {
     if (!this.ctx || !this.masterGain) return;
-    this.ensureContext();
+    await this.ensureContext();
 
     const bufferSize = this.ctx.sampleRate * duration;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -79,10 +86,10 @@ class SoundManager {
     this.playTone(100, 'sawtooth', 0.3, 0.5);
   }
 
-  playActivation() {
+  async playActivation() {
     // "Power up"
     if (!this.ctx || !this.masterGain) return;
-    this.ensureContext();
+    await this.ensureContext();
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.frequency.setValueAtTime(200, this.ctx.currentTime);
@@ -99,6 +106,41 @@ class SoundManager {
     // "Magic chime"
     this.playTone(1200, 'sine', 0.5, 0.3);
     setTimeout(() => this.playTone(1600, 'sine', 0.5, 0.3), 100);
+  }
+
+  // --- BACKGROUND MUSIC ---
+  async toggleMusic() {
+    if (!this.bgMusic) return;
+    await this.ensureContext();
+
+    if (this.isMusicPlaying) {
+      this.bgMusic.pause();
+    } else {
+      try {
+        await this.bgMusic.play();
+      } catch (e) {
+        console.error('Music play failed:', e);
+      }
+    }
+    this.isMusicPlaying = !this.isMusicPlaying;
+    return this.isMusicPlaying;
+  }
+
+  getMusicStatus() {
+    return this.isMusicPlaying;
+  }
+
+  async startMusicIfPossible() {
+    if (!this.bgMusic || this.isMusicPlaying) return;
+
+    try {
+      await this.ensureContext();
+      await this.bgMusic.play();
+      this.isMusicPlaying = true;
+    } catch (e) {
+      // Silent fail - often blocked by browser until user interaction
+      console.log('Autoplay blocked or pending interaction');
+    }
   }
 }
 

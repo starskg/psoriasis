@@ -14,6 +14,9 @@ interface MicroCanvasProps {
     isPaused: boolean;
     demoState: DemoState;
     onDemoFocusUpdate: (target: { x: number; y: number } | null) => void;
+    onCellClick: (type: CellType | null) => void;
+    isUIVisible: boolean;
+    onLogEvent: (msg: string) => void;
 }
 
 interface EffectParticle {
@@ -36,15 +39,63 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
     timeScale,
     isPaused,
     demoState,
-    onDemoFocusUpdate
+    onDemoFocusUpdate,
+    onCellClick,
+    isUIVisible,
+    onLogEvent
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const particlesRef = useRef<Particle[]>([]);
     const effectsRef = useRef<EffectParticle[]>([]);
     const requestRef = useRef<number>();
 
+    // Refs for props to avoid stale closures in animation loop
+    const isAlertActiveRef = useRef(isAlertActive);
+    const cytokineLevelRef = useRef(cytokineLevel);
+    const timeScaleRef = useRef(timeScale);
+    const isPausedRef = useRef(isPaused);
+    const demoStateRef = useRef(demoState);
+    const isUIVisibleRef = useRef(isUIVisible);
+    const onLogEventRef = useRef(onLogEvent);
+
+    useEffect(() => { isAlertActiveRef.current = isAlertActive; }, [isAlertActive]);
+    useEffect(() => { cytokineLevelRef.current = cytokineLevel; }, [cytokineLevel]);
+    useEffect(() => { timeScaleRef.current = timeScale; }, [timeScale]);
+    useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+    useEffect(() => { demoStateRef.current = demoState; }, [demoState]);
+    useEffect(() => { isUIVisibleRef.current = isUIVisible; }, [isUIVisible]);
+    useEffect(() => { onLogEventRef.current = onLogEvent; }, [onLogEvent]);
+
+    const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = (e.clientX - rect.left);
+        const y = (e.clientY - rect.top);
+        const z = zoomRef.current;
+        const width = canvasRef.current.width;
+        const height = canvasRef.current.height;
+
+        // Account for zoom transform:
+        // ctx.translate(width / 2, height / 2); ctx.scale(z, z); ctx.translate(-width / 2, -height / 2);
+        const worldX = (x - width / 2) / z + width / 2;
+        const worldY = (y - height / 2) / z + height / 2;
+
+        const found = particlesRef.current.find(p => {
+            const dist = Math.sqrt((p.x - worldX) ** 2 + (p.y - worldY) ** 2);
+            return dist < p.radius + 15;
+        });
+
+        if (found) {
+            onCellClick(found.type);
+            createExplosion(found.x, found.y, found.glowColor, 5);
+        } else {
+            onCellClick(null);
+        }
+    };
+
     const [zoom, setZoom] = useState(1.0);
     const zoomRef = useRef(1.0);
+    const mousePosRef = useRef({ x: 0, y: 0 });
     const statsRef = useRef({ killed: 0, saved: 0 });
     const prevStatsRef = useRef({ killed: 0, saved: 0 });
 
@@ -64,9 +115,20 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
             zoomRef.current = newZoom;
             setZoom(newZoom);
         };
+
+        const handleMouseMove = (e: MouseEvent) => {
+            mousePosRef.current = { x: e.clientX, y: e.clientY };
+        };
+
         const canvas = canvasRef.current;
-        if (canvas) canvas.addEventListener('wheel', handleWheel, { passive: false });
-        return () => { if (canvas) canvas.removeEventListener('wheel', handleWheel); };
+        if (canvas) {
+            canvas.addEventListener('wheel', handleWheel, { passive: false });
+            window.addEventListener('mousemove', handleMouseMove);
+        }
+        return () => {
+            if (canvas) canvas.removeEventListener('wheel', handleWheel);
+            window.removeEventListener('mousemove', handleMouseMove);
+        };
     }, []);
 
     const createParticle = useCallback((type: CellType, width: number, height: number, drugType?: DrugType): Particle => {
@@ -132,11 +194,17 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         const height = window.innerHeight;
         const particles: Particle[] = [];
 
-        // Initial Population
-        for (let i = 0; i < 40; i++) particles.push(createParticle(CellType.SKIN, width, height));
-        for (let i = 0; i < 5; i++) particles.push(createParticle(CellType.DENDRITIC, width, height));
-        for (let i = 0; i < 8; i++) particles.push(createParticle(CellType.T_CD4, width, height));
-        for (let i = 0; i < 6; i++) particles.push(createParticle(CellType.T_CD8, width, height));
+        // Initial Population (Reduced for performance)
+        for (let i = 0; i < 20; i++) particles.push(createParticle(CellType.SKIN, width, height));
+        for (let i = 0; i < 3; i++) particles.push(createParticle(CellType.DENDRITIC, width, height));
+        for (let i = 0; i < 4; i++) particles.push(createParticle(CellType.T_CD4, width, height));
+        for (let i = 0; i < 4; i++) particles.push(createParticle(CellType.T_TH17, width, height));
+        for (let i = 0; i < 3; i++) particles.push(createParticle(CellType.T_CD8, width, height));
+        for (let i = 0; i < 3; i++) particles.push(createParticle(CellType.T_REG, width, height));
+        for (let i = 0; i < 2; i++) particles.push(createParticle(CellType.MACROPHAGE, width, height));
+        for (let i = 0; i < 3; i++) particles.push(createParticle(CellType.NK_CELL, width, height));
+        for (let i = 0; i < 3; i++) particles.push(createParticle(CellType.NEUTROPHIL, width, height));
+        for (let i = 0; i < 2; i++) particles.push(createParticle(CellType.B_PLASMA, width, height));
 
         particlesRef.current = particles;
     }, [createParticle]);
@@ -158,10 +226,33 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         targetSkin: null
     });
     const lastDemoStepRef = useRef<DemoStep>(DemoStep.IDLE);
+    const demoTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+    const clearDemoTimeouts = useCallback(() => {
+        demoTimeoutsRef.current.forEach(t => clearTimeout(t));
+        demoTimeoutsRef.current = [];
+    }, []);
 
     // Demo Mode Logic
     useEffect(() => {
         if (!demoState.isActive) {
+            if (lastDemoStepRef.current !== DemoStep.IDLE) {
+                // We just stopped the demo, cleanup
+                clearDemoTimeouts();
+                particlesRef.current = particlesRef.current.filter(p =>
+                    p.type !== CellType.ANTIGEN && p.type !== CellType.CYTOKINE
+                );
+
+                // Reset states and radii
+                particlesRef.current.forEach(p => {
+                    p.isActive = false;
+                    p.hasAntigen = false;
+                    const config = CELL_CONFIGS[p.type];
+                    if (config) p.radius = config.radius;
+                });
+
+                onDemoFocusUpdate(null);
+            }
             lastDemoStepRef.current = DemoStep.IDLE;
             demoParticlesRef.current = {
                 antigen: null, dendritic: null, tHelper: null, cytokine: null, tKiller: null, targetSkin: null
@@ -172,6 +263,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         // Only run when step changes
         if (demoState.currentStep === lastDemoStepRef.current) return;
         lastDemoStepRef.current = demoState.currentStep;
+        clearDemoTimeouts();
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -215,7 +307,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     dendritic.radius = 16; // Larger for visibility
 
                     // After a longer delay, capture antigen
-                    setTimeout(() => {
+                    const t = setTimeout(() => {
                         if (antigen.health > 0) {
                             antigen.health = 0;
                             dendritic.hasAntigen = true;
@@ -223,6 +315,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                             soundManager.playActivation();
                         }
                     }, 4000); // Increased from 1500
+                    demoTimeoutsRef.current.push(t);
 
                     demoParticlesRef.current.dendritic = dendritic;
                     onDemoFocusUpdate({ x: dendritic.x, y: dendritic.y });
@@ -243,12 +336,13 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     tHelper.radius = 14;
 
                     // Activate after longer contact time
-                    setTimeout(() => {
+                    const t = setTimeout(() => {
                         tHelper.isActive = true;
                         dendritic.hasAntigen = false;
                         createExplosion(tHelper.x, tHelper.y, '#3b82f6', 18);
                         soundManager.playActivation();
                     }, 4500); // Increased from 1800
+                    demoTimeoutsRef.current.push(t);
 
                     demoParticlesRef.current.tHelper = tHelper;
                     onDemoFocusUpdate({ x: (dendritic.x + tHelper.x) / 2, y: tHelper.y });
@@ -262,7 +356,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                 if (tHelper && tHelper.isActive) {
                     // Spawn multiple cytokines from T-Helper - slower spawn
                     for (let i = 0; i < 6; i++) {
-                        setTimeout(() => {
+                        const t = setTimeout(() => {
                             const cytokine = createParticle(CellType.CYTOKINE, width, height);
                             cytokine.x = tHelper.x;
                             cytokine.y = tHelper.y;
@@ -276,6 +370,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                             }
                             createExplosion(cytokine.x, cytokine.y, '#fbbf24', 5);
                         }, i * 800); // Increased from 400
+                        demoTimeoutsRef.current.push(t);
                     }
 
                     onDemoFocusUpdate({ x: tHelper.x, y: tHelper.y });
@@ -294,7 +389,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     tKiller.y = centerY;
                     tKiller.radius = 14;
 
-                    setTimeout(() => {
+                    const t = setTimeout(() => {
                         tKiller.isActive = true;
                         // Remove cytokine
                         const cytoIndex = particlesRef.current.findIndex(p => p === cytokine);
@@ -304,6 +399,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                         createExplosion(tKiller.x, tKiller.y, '#ef4444', 22);
                         soundManager.playActivation();
                     }, 4000); // Increased from 1500
+                    demoTimeoutsRef.current.push(t);
 
                     demoParticlesRef.current.tKiller = tKiller;
                     onDemoFocusUpdate({ x: tKiller.x, y: tKiller.y });
@@ -325,12 +421,13 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     // Make target skin visible
                     targetSkin.radius = 16;
 
-                    setTimeout(() => {
+                    const t = setTimeout(() => {
                         targetSkin.health = 0;
                         createExplosion(targetSkin.x, targetSkin.y, '#ef4444', 30);
                         soundManager.playExplosion();
                         statsRef.current.killed++;
                     }, 5000); // Increased from 2000
+                    demoTimeoutsRef.current.push(t);
 
                     demoParticlesRef.current.targetSkin = targetSkin;
                     onDemoFocusUpdate({ x: targetSkin.x, y: targetSkin.y });
@@ -375,9 +472,19 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                 ctx.strokeStyle = p.hasAntigen ? '#ff0000' : p.glowColor; ctx.stroke();
             }
         }
-        else if (p.type === CellType.T_CD4 || p.type === CellType.T_CD8) {
+        else if (p.type === CellType.T_CD4 || p.type === CellType.T_CD8 || p.type === CellType.T_TH17 || p.type === CellType.T_REG) {
             ctx.fillStyle = p.isActive ? '#ef4444' : CELL_CONFIGS[p.type].color;
             ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+            if (p.type === CellType.T_TH17 && p.isActive) {
+                // Th17 cells have "spikes" when active
+                ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2;
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2;
+                    ctx.beginPath(); ctx.moveTo(0, 0);
+                    ctx.lineTo(Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5);
+                    ctx.stroke();
+                }
+            }
         }
         else if (p.type === CellType.CYTOKINE) {
             ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(0, 0, r / 2, 0, Math.PI * 2); ctx.fill();
@@ -386,9 +493,39 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
             ctx.fillStyle = p.health / p.maxHealth < 0.5 ? '#7f1d1d' : CELL_CONFIGS[p.type].color;
             ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
         }
-        else if (p.type === CellType.DRUG) {
+        else if (p.type === CellType.MACROPHAGE) {
             ctx.fillStyle = p.glowColor;
+            ctx.beginPath();
+            if (p.points) {
+                p.points.forEach((pt, i) => {
+                    const pr = r * (0.8 + Math.sin(p.pulse + i) * 0.2);
+                    if (i === 0) ctx.moveTo(pt.x * (pr / p.radius), pt.y * (pr / p.radius));
+                    else ctx.lineTo(pt.x * (pr / p.radius), pt.y * (pr / p.radius));
+                });
+            } else {
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+            }
+            ctx.closePath(); ctx.fill();
+        }
+        else if (p.type === CellType.NEUTROPHIL) {
+            // Neutrophils have multi-lobed nucleus feel
+            ctx.fillStyle = '#f9fafb';
             ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(100, 100, 255, 0.3)';
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath(); ctx.arc(Math.cos(i * 2) * r * 0.4, Math.sin(i * 2) * r * 0.4, r * 0.3, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+        else if (p.type === CellType.B_PLASMA) {
+            ctx.fillStyle = p.glowColor;
+            ctx.beginPath(); ctx.ellipse(0, 0, r * 1.2, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        else if (p.type === CellType.ANTIBODY) {
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r);
+            ctx.moveTo(0, 0); ctx.lineTo(-r, r);
+            ctx.moveTo(0, 0); ctx.lineTo(r, r);
+            ctx.stroke();
         }
         else {
             ctx.fillStyle = CELL_CONFIGS[p.type]?.color || '#fff';
@@ -546,10 +683,10 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
     // Helper to draw text box on canvas
     const drawTextBox = (ctx: CanvasRenderingContext2D, x: number, y: number, text: string, color: string = '#a855f7') => {
         ctx.save();
-        ctx.font = 'bold 16px "Segoe UI", Arial';
+        ctx.font = 'bold 15px "Segoe UI", Arial'; // Slightly smaller font
         const lines = text.split('\n');
-        const lineHeight = 22;
-        const maxWidth = Math.max(...lines.map(l => ctx.measureText(l).width));
+        const lineHeight = 20;
+        const maxWidth = Math.min(200, Math.max(...lines.map(l => ctx.measureText(l).width))); // Narrower box
         const boxWidth = maxWidth + 30;
         const boxHeight = lines.length * lineHeight + 20;
 
@@ -577,6 +714,63 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         ctx.restore();
     };
 
+    const drawBackground = (ctx: CanvasRenderingContext2D, width: number, height: number, zoom: number) => {
+        const mx = mousePosRef.current.x;
+        const my = mousePosRef.current.y;
+
+        // Background - Deep Tissue (Dermis)
+        const dermisGrad = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width);
+        dermisGrad.addColorStop(0, '#0a0a0f');
+        dermisGrad.addColorStop(1, '#050505');
+        ctx.fillStyle = dermisGrad;
+        ctx.fillRect(0, 0, width, height);
+
+        // Parallax offsets
+        const ox = (mx - width / 2) * 0.05;
+        const oy = (my - height / 2) * 0.05;
+
+        // Dermis Layer (Grid/Fiber effect)
+        ctx.save();
+        ctx.translate(ox * 0.5, oy * 0.5);
+        ctx.strokeStyle = 'rgba(127, 29, 29, 0.1)'; // Deep red fibers
+        ctx.lineWidth = 1;
+        for (let i = 0; i < width; i += 100) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+        }
+        for (let i = 0; i < height; i += 100) {
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+        }
+        ctx.restore();
+
+        // Epidermis Layer (Upper tissue)
+        ctx.save();
+        ctx.translate(ox, oy);
+        // Create organic cellular pattern for epidermis
+        ctx.globalAlpha = 0.05;
+        ctx.fillStyle = '#1e1b4b'; // Subtle blue/purple tissue
+        for (let i = 0; i < 20; i++) {
+            const tx = (Math.sin(i) * 0.5 + 0.5) * width;
+            const ty = (Math.cos(i * 1.3) * 0.5 + 0.5) * height;
+            ctx.beginPath();
+            ctx.ellipse(tx, ty, 300, 200, i, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Add subtle "vessels" or noise
+        ctx.save();
+        ctx.globalAlpha = 0.03;
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+            ctx.moveTo(0, height * (i / 10));
+            ctx.bezierCurveTo(width / 3, height * (i / 10) + 50, width * 0.6, height * (i / 10) - 50, width, height * (i / 10));
+        }
+        ctx.stroke();
+        ctx.restore();
+    };
+
     // Draw function for paused state and demo mode
     const draw = () => {
         if (!canvasRef.current) return;
@@ -588,22 +782,21 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         // In demo mode, zoom in more on focus target
         let offsetX = 0;
         let offsetY = 0;
-        if (demoState.isActive && demoState.focusTarget) {
-            z = 2.2; // More zoom for better visibility
-            offsetX = width / 2 - demoState.focusTarget.x * z;
-            offsetY = height / 2 - demoState.focusTarget.y * z;
+        const currentDemoState = demoStateRef.current;
+        if (currentDemoState.isActive && currentDemoState.focusTarget) {
+            z = 2.0; // Slightly less zoom to see more context
+            // Shift focus to the right slightly to avoid the left stats panel
+            const shiftX = (width > 768) ? 80 : 0;
+            offsetX = width / 2 - currentDemoState.focusTarget.x * z + shiftX;
+            offsetY = height / 2 - currentDemoState.focusTarget.y * z;
         }
 
         ctx.clearRect(0, 0, width, height);
-        const grad = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width);
-        grad.addColorStop(0, demoState.isActive ? '#0f0a1a' : '#0a0a0f');
-        grad.addColorStop(1, '#050505');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
+        drawBackground(ctx, width, height, z);
 
         ctx.save();
 
-        if (demoState.isActive && demoState.focusTarget) {
+        if (currentDemoState.isActive && currentDemoState.focusTarget) {
             ctx.translate(offsetX, offsetY);
             ctx.scale(z, z);
         } else {
@@ -613,21 +806,21 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         }
 
         // Draw spotlight effect on demo focus target
-        if (demoState.isActive && demoState.focusTarget) {
+        if (currentDemoState.isActive && currentDemoState.focusTarget) {
             const spotlightGrad = ctx.createRadialGradient(
-                demoState.focusTarget.x, demoState.focusTarget.y, 0,
-                demoState.focusTarget.x, demoState.focusTarget.y, 250
+                currentDemoState.focusTarget.x, currentDemoState.focusTarget.y, 0,
+                currentDemoState.focusTarget.x, currentDemoState.focusTarget.y, 250
             );
             spotlightGrad.addColorStop(0, 'rgba(168, 85, 247, 0.2)');
             spotlightGrad.addColorStop(0.5, 'rgba(168, 85, 247, 0.08)');
             spotlightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = spotlightGrad;
-            ctx.fillRect(demoState.focusTarget.x - 300, demoState.focusTarget.y - 300, 600, 600);
+            ctx.fillRect(currentDemoState.focusTarget.x - 300, currentDemoState.focusTarget.y - 300, 600, 600);
 
             // Pulsing ring around focus
             const pulseSize = 80 + Math.sin(Date.now() * 0.003) * 20;
             ctx.beginPath();
-            ctx.arc(demoState.focusTarget.x, demoState.focusTarget.y, pulseSize, 0, Math.PI * 2);
+            ctx.arc(currentDemoState.focusTarget.x, currentDemoState.focusTarget.y, pulseSize, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(168, 85, 247, ${0.5 + Math.sin(Date.now() * 0.003) * 0.2})`;
             ctx.lineWidth = 4;
             ctx.setLineDash([15, 8]);
@@ -640,16 +833,16 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         particlesRef.current.forEach(p => drawOrganicCell(ctx, p));
 
         // Demo mode arrows and labels
-        if (demoState.isActive) {
+        if (currentDemoState.isActive) {
             const demo = demoParticlesRef.current;
 
-            switch (demoState.currentStep) {
+            switch (currentDemoState.currentStep) {
                 case DemoStep.ANTIGEN_APPEARS: {
                     if (demo.antigen) {
                         // Arrow pointing to antigen
                         drawArrow(ctx, demo.antigen.x - 100, demo.antigen.y - 80, demo.antigen.x - 25, demo.antigen.y - 25, '#ef4444');
-                        drawTextBox(ctx, demo.antigen.x, demo.antigen.y - 130,
-                            '🦠 АНТИГЕН\n━━━━━━━━━━━━━━━\nЭто чужеродный объект\n(бактерия, вирус или\n"ложный враг" при псориазе)', '#ef4444');
+                        drawTextBox(ctx, demo.antigen.x, demo.antigen.y - 180,
+                            '🦠 АНТИГЕН\n━━━━━━━━━━━━━━━\nВнешняя угроза', '#ef4444');
                     }
                     break;
                 }
@@ -660,8 +853,8 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                         if (demo.antigen.health > 0) {
                             drawArrow(ctx, demo.antigen.x, demo.antigen.y, demo.dendritic.x + 30, demo.dendritic.y, '#fbbf24', '→ ЗАХВАТ');
                         }
-                        drawTextBox(ctx, demo.dendritic.x, demo.dendritic.y - 140,
-                            '🔬 ДЕНДРИТНАЯ КЛЕТКА\n━━━━━━━━━━━━━━━━━━━\nЭто "разведчик" иммунной\nсистемы. Она находит антиген\nи поглощает его.', '#fbbf24');
+                        drawTextBox(ctx, demo.dendritic.x, demo.dendritic.y - 180,
+                            '🔬 ДЕНДРИТНАЯ КЛЕТКА\n━━━━━━━━━━━━━━━━━━━\nПередовой разведчик', '#fbbf24');
                     }
                     break;
                 }
@@ -670,8 +863,8 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     if (demo.dendritic && demo.tHelper) {
                         // Arrow from dendritic to T-Helper
                         drawArrow(ctx, demo.dendritic.x + 20, demo.dendritic.y, demo.tHelper.x - 20, demo.tHelper.y, '#3b82f6', '→ СИГНАЛ');
-                        drawTextBox(ctx, (demo.dendritic.x + demo.tHelper.x) / 2, demo.dendritic.y - 140,
-                            '🛡️ T-ХЕЛПЕР (CD4+)\n━━━━━━━━━━━━━━━━━━\nДендритная клетка передаёт\nсигнал T-хелперу. Он становится\n"командиром" иммунного ответа.', '#3b82f6');
+                        drawTextBox(ctx, (demo.dendritic.x + demo.tHelper.x) / 2, demo.dendritic.y - 180,
+                            '🛡️ T-ХЕЛПЕР (CD4+)\n━━━━━━━━━━━━━━━━━━\nКоординатор атаки', '#3b82f6');
                     }
                     break;
                 }
@@ -685,8 +878,8 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                             const endY = demo.tHelper.y + Math.sin(angle) * 70;
                             drawArrow(ctx, demo.tHelper.x, demo.tHelper.y, endX, endY, '#fbbf24');
                         }
-                        drawTextBox(ctx, demo.tHelper.x, demo.tHelper.y - 150,
-                            '📡 ЦИТОКИНЫ\n━━━━━━━━━━━━━━━━━━━\nT-хелпер выделяет цитокины —\nмолекулы-"посыльные", которые\nпередают сигнал тревоги\nдругим клеткам иммунитета.', '#fbbf24');
+                        drawTextBox(ctx, demo.tHelper.x, demo.tHelper.y - 200,
+                            '📡 ЦИТОКИНЫ\n━━━━━━━━━━━━━━━━━━━\nМолекулы сигнализации', '#fbbf24');
                     }
                     break;
                 }
@@ -695,8 +888,8 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     if (demo.tKiller && demo.cytokine) {
                         // Arrow from cytokine to T-Killer
                         drawArrow(ctx, demo.cytokine.x, demo.cytokine.y, demo.tKiller.x - 20, demo.tKiller.y, '#ef4444', '→ АКТИВАЦИЯ');
-                        drawTextBox(ctx, demo.tKiller.x, demo.tKiller.y - 140,
-                            '⚔️ T-КИЛЛЕР (CD8+)\n━━━━━━━━━━━━━━━━━━━\nЦитокины достигают T-киллера.\nЭта клетка — "убийца" иммунной\nсистемы. Она готова атаковать!', '#ef4444');
+                        drawTextBox(ctx, demo.tKiller.x, demo.tKiller.y - 180,
+                            '⚔️ T-КИЛЛЕР (CD8+)\n━━━━━━━━━━━━━━━━━━━\nКлетка-убийца', '#ef4444');
                     }
                     break;
                 }
@@ -705,8 +898,8 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     if (demo.tKiller && demo.targetSkin) {
                         // Arrow from T-Killer to skin
                         drawArrow(ctx, demo.tKiller.x + 20, demo.tKiller.y, demo.targetSkin.x - 20, demo.targetSkin.y, '#dc2626', '→ АТАКА!');
-                        drawTextBox(ctx, (demo.tKiller.x + demo.targetSkin.x) / 2, demo.tKiller.y - 150,
-                            '💥 ОШИБОЧНАЯ АТАКА!\n━━━━━━━━━━━━━━━━━━━━━\nПри псориазе T-киллер ошибочно\nатакует ЗДОРОВЫЕ клетки кожи.\nЭто вызывает воспаление и\nхарактерные бляшки на коже.', '#dc2626');
+                        drawTextBox(ctx, (demo.tKiller.x + demo.targetSkin.x) / 2, demo.tKiller.y - 180,
+                            '💥 ОШИБОЧНАЯ АТАКА!\n━━━━━━━━━━━━━━━━━━━━━\nЦель: СВОИ КЛЕТКИ', '#dc2626');
                     }
                     break;
                 }
@@ -716,7 +909,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         ctx.restore();
 
         // Demo mode overlay UI (outside canvas transform)
-        if (demoState.isActive) {
+        if (currentDemoState.isActive) {
             // Top banner with step info
             const stepInfo = {
                 [DemoStep.ANTIGEN_APPEARS]: {
@@ -757,65 +950,64 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                 [DemoStep.IDLE]: { num: 0, title: '', desc: '' }
             };
 
-            const info = stepInfo[demoState.currentStep];
+            const info = stepInfo[currentDemoState.currentStep];
             if (info && info.num > 0) {
                 // Large step indicator
                 ctx.save();
 
-                // Background banner
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-                ctx.fillRect(0, 60, width, 110);
+                // Background banner (Smaller and higher up)
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, width, 100);
 
-                // Purple gradient line
-                const lineGrad = ctx.createLinearGradient(0, 60, width, 60);
+                // Purple gradient bottom border for banner
+                const lineGrad = ctx.createLinearGradient(0, 100, width, 100);
                 lineGrad.addColorStop(0, 'rgba(168, 85, 247, 0)');
                 lineGrad.addColorStop(0.5, 'rgba(168, 85, 247, 1)');
                 lineGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
                 ctx.fillStyle = lineGrad;
-                ctx.fillRect(0, 60, width, 3);
-                ctx.fillRect(0, 167, width, 3);
+                ctx.fillRect(0, 97, width, 3); // Adjusted Y for bottom border
 
-                // Step number circle
+                // Step number circle (Positioned in banner)
                 ctx.beginPath();
-                ctx.arc(80, 115, 40, 0, Math.PI * 2);
+                ctx.arc(60, 50, 30, 0, Math.PI * 2);
                 ctx.fillStyle = '#a855f7';
-                ctx.shadowBlur = 25;
+                ctx.shadowBlur = 15;
                 ctx.shadowColor = '#a855f7';
                 ctx.fill();
 
                 ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 36px "Segoe UI", Arial';
+                ctx.font = 'bold 24px "Segoe UI", Arial';
                 ctx.textAlign = 'center';
                 ctx.shadowBlur = 0;
-                ctx.fillText(info.num.toString(), 80, 128);
+                ctx.fillText(info.num.toString(), 60, 58);
 
                 // Step label
                 ctx.fillStyle = 'rgba(168, 85, 247, 0.8)';
-                ctx.font = 'bold 12px "Segoe UI", Arial';
-                ctx.fillText('ШАГ', 80, 90);
+                ctx.font = '9px "Segoe UI", Arial';
+                ctx.fillText('ШАГ', 60, 30);
 
                 // Title
                 ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 26px "Segoe UI", Arial';
+                ctx.font = 'bold 22px "Segoe UI", Arial';
                 ctx.textAlign = 'left';
-                ctx.fillText(info.title, 140, 105);
+                ctx.fillText(info.title, 140, 45);
 
                 // Description
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.font = '16px "Segoe UI", Arial';
-                ctx.fillText(info.desc, 140, 135);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.font = '14px "Segoe UI", Arial';
+                ctx.fillText(info.desc, 140, 75);
 
-                // Progress dots
+                // Progress dots (Inside banner)
                 const totalSteps = 6;
-                const dotY = 155;
+                const dotY = 88;
                 const dotStartX = 140;
                 for (let i = 0; i < totalSteps; i++) {
                     ctx.beginPath();
-                    ctx.arc(dotStartX + i * 25, dotY, 6, 0, Math.PI * 2);
+                    ctx.arc(dotStartX + i * 22, dotY, 4, 0, Math.PI * 2);
                     if (i < info.num) {
                         ctx.fillStyle = '#a855f7';
                     } else {
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
                     }
                     ctx.fill();
                 }
@@ -832,12 +1024,20 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
             ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.font = '10px monospace';
             ctx.textAlign = 'left';
-            ctx.fillText(`ZOOM: ${z.toFixed(1)}x | ⏸ PAUSED`, 10, height - 10);
+            ctx.fillText(`ZOOM: ${z.toFixed(1)}x | ${isPausedRef.current ? '⏸ PAUSED' : '⚡ ACTIVE'}`, 10, height - 10);
         }
     };
 
     const update = () => {
         if (!canvasRef.current) return;
+
+        const isPaused = isPausedRef.current;
+        const demoState = demoStateRef.current;
+        const isAlertActive = isAlertActiveRef.current;
+        const cytokineLevel = cytokineLevelRef.current;
+        const timeScale = timeScaleRef.current;
+        const isUIVisible = isUIVisibleRef.current;
+        const onLogEvent = onLogEventRef.current;
 
         // In demo mode or paused, use the controlled draw function
         if (isPaused || demoState.isActive) {
@@ -851,11 +1051,22 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         let particles = particlesRef.current;
 
         // Store connections to draw lines
+        // Store connections to draw lines
         const connections: { x1: number, y1: number, x2: number, y2: number, color: string }[] = [];
-
-        // 1. Spawn Antigens
-        if ((isAlertActive || cytokineLevel > 50) && Math.random() < 0.03 * timeScale && particles.length < 150) {
+        // 1. Spawn Antigens with higher rate if alert is active, but lower total limit
+        const spawnTarget = isAlertActive ? 0.08 : 0.03;
+        if ((isAlertActive || cytokineLevel > 50) && Math.random() < spawnTarget * timeScale && particles.length < 100) {
             particles.push(createParticle(CellType.ANTIGEN, simWidth, simHeight));
+            if (Math.random() < 0.05) onLogEvent("Обнаружен новый антиген в слоях эпидермиса.");
+        }
+
+        // 1.5 Spontaneous activation during severe alert (to simulate autoimmune jumpstart)
+        if (isAlertActive && Math.random() < 0.005 * timeScale) {
+            const dormantHelper = particles.find(p => (p.type === CellType.T_CD4 || p.type === CellType.T_TH17) && !p.isActive);
+            if (dormantHelper) {
+                dormantHelper.isActive = true;
+                if (Math.random() < 0.1) onLogEvent("Спонтанная активация Т-лимфоцита из-за воспаления.");
+            }
         }
 
         for (let i = 0; i < particles.length; i++) {
@@ -864,11 +1075,28 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
 
             p.x += p.vx * timeScale; p.y += p.vy * timeScale;
             p.pulse += 0.05 * timeScale; p.rotation += 0.01 * timeScale;
-            if (p.x < 0 || p.x > simWidth) p.vx *= -1;
-            if (p.y < 0 || p.y > simHeight) p.vy *= -1;
+
+            // Organic Brownian-like movement (jitter)
+            if (Math.random() < 0.1 * timeScale) {
+                p.vx += (Math.random() - 0.5) * 0.05;
+                p.vy += (Math.random() - 0.5) * 0.05;
+            }
+
+            // Boundary Constraints with UI Awareness
+            let minX = 0, maxX = simWidth, minY = 0, maxY = simHeight;
+
+            if (isUIVisible && window.innerWidth > 768) { // Desktop constraints
+                minX = 330; // Left panel
+                maxX = simWidth - 360; // Right panel
+                minY = 90; // Top legend bar
+            }
+
+            if (p.x < minX) { p.x = minX; p.vx *= -1; }
+            if (p.x > maxX) { p.x = maxX; p.vx *= -1; }
+            if (p.y < minY) { p.y = minY; p.vy *= -1; }
+            if (p.y > maxY) { p.y = maxY; p.vy *= -1; }
 
             if (p.type === CellType.DENDRITIC) {
-                // Limit maximum velocity
                 const maxVel = 0.8;
                 if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
                 if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
@@ -877,93 +1105,178 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                     const antigen = particles.find(t => t.type === CellType.ANTIGEN && t.health > 0);
                     if (antigen) {
                         const dist = Math.sqrt((p.x - antigen.x) ** 2 + (p.y - antigen.y) ** 2);
-                        if (dist < 150) {
-                            // Much slower acceleration: 0.5 -> 0.08
-                            p.vx += ((antigen.x - p.x) / dist) * 0.08 * timeScale;
-                            p.vy += ((antigen.y - p.y) / dist) * 0.08 * timeScale;
+                        const attractDist = isAlertActive ? 350 : 200;
+                        if (dist < attractDist) {
+                            p.vx += ((antigen.x - p.x) / dist) * 0.12 * timeScale;
+                            p.vy += ((antigen.y - p.y) / dist) * 0.12 * timeScale;
                             connections.push({ x1: p.x, y1: p.y, x2: antigen.x, y2: antigen.y, color: '#fbbf24' });
                         }
                         if (dist < p.radius + antigen.radius) {
                             antigen.health = 0; p.hasAntigen = true;
                             createExplosion(p.x, p.y, '#fbbf24', 5);
                             soundManager.playActivation();
+                            onLogEvent("Дендритная клетка захватила антиген.");
                         }
                     }
                 } else {
-                    const helper = particles.find(t => t.type === CellType.T_CD4 && !t.isActive);
+                    const helper = particles.find(t => (t.type === CellType.T_CD4 || t.type === CellType.T_TH17) && !t.isActive);
                     if (helper) {
                         const dist = Math.sqrt((p.x - helper.x) ** 2 + (p.y - helper.y) ** 2);
                         connections.push({ x1: p.x, y1: p.y, x2: helper.x, y2: helper.y, color: '#ef4444' });
-                        // Much slower acceleration: 0.5 -> 0.08
-                        p.vx += ((helper.x - p.x) / dist) * 0.08 * timeScale;
-                        p.vy += ((helper.y - p.y) / dist) * 0.08 * timeScale;
+                        p.vx += ((helper.x - p.x) / dist) * 0.1 * timeScale;
+                        p.vy += ((helper.y - p.y) / dist) * 0.1 * timeScale;
                         if (dist < p.radius + helper.radius + 10) {
                             helper.isActive = true; p.hasAntigen = false;
                             createExplosion(helper.x, helper.y, '#3b82f6', 10);
                             soundManager.playActivation();
+                            onLogEvent(`Активирован ${helper.type === CellType.T_TH17 ? 'Th17' : 'T-хелпер'}.`);
                         }
                     }
                 }
             }
-            else if (p.type === CellType.T_CD4 && p.isActive) {
-                // Limit velocity
+            else if ((p.type === CellType.T_CD4 || p.type === CellType.T_TH17) && p.isActive) {
                 const maxVel = 0.6;
                 if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
                 if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
 
-                if (Math.random() < 0.015 * timeScale) { // Spawn less frequently
+                const spawnChance = p.type === CellType.T_TH17 ? 0.025 : 0.015;
+                if (Math.random() < spawnChance * timeScale) {
                     const cyto = createParticle(CellType.CYTOKINE, simWidth, simHeight);
                     cyto.x = p.x; cyto.y = p.y;
-                    cyto.vx = (Math.random() - 0.5) * 1.5; // Slower: 4 -> 1.5
+                    cyto.vx = (Math.random() - 0.5) * 1.5;
                     cyto.vy = (Math.random() - 0.5) * 1.5;
                     particles.push(cyto);
+                    onLogEvent("Выброс цитокинов активированной Т-клеткой.");
                 }
             }
             else if (p.type === CellType.CYTOKINE) {
-                // Limit velocity
                 const maxVel = 1.0;
                 if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
                 if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
 
-                const killer = particles.find(t => t.type === CellType.T_CD8 && !t.isActive);
-                if (killer) {
-                    const dist = Math.sqrt((p.x - killer.x) ** 2 + (p.y - killer.y) ** 2);
-                    if (dist < 200) {
-                        // Slower: 0.8 -> 0.12
-                        p.vx += ((killer.x - p.x) / dist) * 0.12 * timeScale;
-                        p.vy += ((killer.y - p.y) / dist) * 0.12 * timeScale;
+                const target = particles.find(t => (t.type === CellType.T_CD8 || t.type === CellType.NEUTROPHIL) && !t.isActive);
+                if (target) {
+                    const dist = Math.sqrt((p.x - target.x) ** 2 + (p.y - target.y) ** 2);
+                    const detectDist = isAlertActive ? 400 : 250;
+                    if (dist < detectDist) {
+                        p.vx += ((target.x - p.x) / dist) * 0.18 * timeScale;
+                        p.vy += ((target.y - p.y) / dist) * 0.18 * timeScale;
                     }
-                    if (dist < killer.radius + p.radius) {
-                        p.health = 0; killer.isActive = true;
-                        createExplosion(killer.x, killer.y, '#ef4444', 10);
+                    if (dist < target.radius + p.radius) {
+                        p.health = 0; target.isActive = true;
+                        createExplosion(target.x, target.y, target.type === CellType.NEUTROPHIL ? '#fff' : '#ef4444', 10);
                         soundManager.playActivation();
+                        onLogEvent(`Активирован ${target.type === CellType.NEUTROPHIL ? 'Нейтрофил' : 'Т-киллер (CD8+)'}.`);
                     }
-                } else p.health -= 0.02;
+                } else p.health -= 0.02 * timeScale;
             }
-            else if (p.type === CellType.T_CD8 && p.isActive) {
-                // Limit velocity
-                const maxVel = 0.7;
+            else if ((p.type === CellType.T_CD8 || p.type === CellType.NEUTROPHIL || p.type === CellType.NK_CELL) && (p.isActive || p.type === CellType.NK_CELL)) {
+                const maxVel = p.type === CellType.NEUTROPHIL ? 0.9 : 0.7;
                 if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
                 if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
 
                 const skin = particles.find(t => t.type === CellType.SKIN && t.health > 0);
-                if (skin) {
-                    const dist = Math.sqrt((p.x - skin.x) ** 2 + (p.y - skin.y) ** 2);
-                    if (dist < 200) {
-                        connections.push({ x1: p.x, y1: p.y, x2: skin.x, y2: skin.y, color: '#7f1d1d' });
-                        // Slower: 0.5 -> 0.1
-                        p.vx += ((skin.x - p.x) / dist) * 0.1 * timeScale;
-                        p.vy += ((skin.y - p.y) / dist) * 0.1 * timeScale;
+                const antigen = particles.find(t => t.type === CellType.ANTIGEN && t.health > 0);
+
+                // NK and Neutrophils prioritize Antigens, but attack skin if no antigens and alert is high
+                const target = antigen || (isAlertActive ? skin : null);
+
+                if (target) {
+                    const dist = Math.sqrt((p.x - target.x) ** 2 + (p.y - target.y) ** 2);
+                    const huntingDist = isAlertActive ? 300 : 200;
+                    if (dist < huntingDist) {
+                        p.vx += ((target.x - p.x) / dist) * 0.15 * timeScale;
+                        p.vy += ((target.y - p.y) / dist) * 0.15 * timeScale;
+                        if (target.type === CellType.SKIN)
+                            connections.push({ x1: p.x, y1: p.y, x2: target.x, y2: target.y, color: '#7f1d1d' });
                     }
-                    if (dist < p.radius + skin.radius + 5) {
-                        skin.health -= 5 * timeScale;
-                        if (skin.health <= 0) {
-                            createExplosion(skin.x, skin.y, '#ef4444', 20);
-                            statsRef.current.killed++;
+                    if (dist < p.radius + target.radius + 5) {
+                        if (target.type === CellType.ANTIGEN) {
+                            target.health = 0;
+                            createExplosion(target.x, target.y, '#ef4444', 15);
                             soundManager.playExplosion();
+                            onLogEvent("Патоген уничтожен защитными клетками.");
+                        } else {
+                            target.health -= 8 * timeScale;
+                            if (target.health <= 0) {
+                                createExplosion(target.x, target.y, '#ef4444', 20);
+                                statsRef.current.killed++;
+                                soundManager.playExplosion();
+                            }
                         }
                     }
                 }
+            }
+            else if (p.type === CellType.MACROPHAGE) {
+                const maxVel = 0.3; // Macrophages are very slow
+                if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
+                if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
+
+                const target = particles.find(t => (t.type === CellType.ANTIGEN || t.type === CellType.CYTOKINE) && t.health > 0);
+                if (target) {
+                    const dist = Math.sqrt((p.x - target.x) ** 2 + (p.y - target.y) ** 2);
+                    if (dist < 300) {
+                        p.vx += ((target.x - p.x) / dist) * 0.02 * timeScale;
+                        p.vy += ((target.y - p.y) / dist) * 0.02 * timeScale;
+                    }
+                    if (dist < p.radius + target.radius) {
+                        target.health = 0;
+                        createExplosion(p.x, p.y, p.glowColor, 8);
+                        soundManager.playActivation();
+                        onLogEvent("Макрофаг утилизировал патоген/цитокин.");
+                    }
+                }
+            }
+            else if (p.type === CellType.T_REG) {
+                const maxVel = 0.5;
+                if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
+                if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
+
+                const activeT = particles.find(t => t.isActive && [CellType.T_CD4, CellType.T_CD8, CellType.T_TH17].includes(t.type));
+                if (activeT) {
+                    const dist = Math.sqrt((p.x - activeT.x) ** 2 + (p.y - activeT.y) ** 2);
+                    if (dist < 250) {
+                        p.vx += ((activeT.x - p.x) / dist) * 0.08 * timeScale;
+                        p.vy += ((activeT.y - p.y) / dist) * 0.08 * timeScale;
+                        connections.push({ x1: p.x, y1: p.y, x2: activeT.x, y2: activeT.y, color: '#fca5a5' });
+                    }
+                    if (dist < p.radius + activeT.radius + 5) {
+                        activeT.isActive = false;
+                        createExplosion(activeT.x, activeT.y, '#fca5a5', 10);
+                        soundManager.playHeal();
+                        onLogEvent("Т-регулятор подавил активность лимфоцита.");
+                    }
+                }
+            }
+            else if (p.type === CellType.B_PLASMA) {
+                const maxVel = 0.25;
+                if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
+                if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
+
+                if (Math.random() < 0.005 * timeScale) {
+                    const ab = createParticle(CellType.ANTIBODY, simWidth, simHeight);
+                    ab.x = p.x; ab.y = p.y;
+                    ab.vx = (Math.random() - 0.5) * 2;
+                    ab.vy = (Math.random() - 0.5) * 2;
+                    particles.push(ab);
+                }
+            }
+            else if (p.type === CellType.ANTIBODY) {
+                const maxVel = 2.0;
+                if (Math.abs(p.vx) > maxVel) p.vx = Math.sign(p.vx) * maxVel;
+                if (Math.abs(p.vy) > maxVel) p.vy = Math.sign(p.vy) * maxVel;
+
+                const target = particles.find(t => t.type === CellType.ANTIGEN && t.health > 0);
+                if (target) {
+                    const dist = Math.sqrt((p.x - target.x) ** 2 + (p.y - target.y) ** 2);
+                    p.vx += ((target.x - p.x) / dist) * 0.2 * timeScale;
+                    p.vy += ((target.y - p.y) / dist) * 0.2 * timeScale;
+                    if (dist < p.radius + target.radius) {
+                        target.health -= 0.5 * timeScale;
+                        p.health = 0; // Antibody is consumed or attached
+                        if (target.health <= 0) createExplosion(target.x, target.y, '#fff', 10);
+                    }
+                } else p.health -= 0.01 * timeScale; // Antibodies decay
             }
             else if (p.type === CellType.DRUG) {
                 // Limit velocity
@@ -987,6 +1300,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
                         createExplosion(target.x, target.y, '#34d399', 15);
                         statsRef.current.saved++;
                         soundManager.playHeal();
+                        onLogEvent("Лекарство достигло цели. Воспаление снижено.");
                     }
                 }
             }
@@ -1009,9 +1323,7 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
             const z = zoomRef.current;
 
             ctx.clearRect(0, 0, width, height);
-            const grad = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width);
-            grad.addColorStop(0, '#0a0a0f'); grad.addColorStop(1, '#050505');
-            ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
+            drawBackground(ctx, width, height, z);
 
             ctx.save();
             ctx.translate(width / 2, height / 2); ctx.scale(z, z); ctx.translate(-width / 2, -height / 2);
@@ -1094,7 +1406,12 @@ const MicroCanvas: React.FC<MicroCanvasProps> = ({
         };
     }, [initSimulation]);
 
-    return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-auto" style={{ filter: 'blur(0.3px) contrast(1.1)' }} />;
+    return <canvas
+        ref={canvasRef}
+        onClick={handleCanvasClick}
+        className="absolute inset-0 pointer-events-auto"
+        style={{ filter: 'blur(0.3px) contrast(1.1)' }}
+    />;
 };
 
 export default MicroCanvas;

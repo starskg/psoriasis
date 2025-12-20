@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { SimulationState, CellType, DrugType, DemoState, DemoStep, DEMO_STEP_INFO } from '../types';
+import { SimulationState, CellType, DrugType, DemoState, DemoStep, DEMO_STEP_INFO, CELL_INFO } from '../types';
 import { CELL_CONFIGS, PSORIASIS_STAGES } from '../constants';
 import { soundManager } from '../utils/audio';
 
@@ -24,6 +24,9 @@ interface DashboardProps {
     onNextDemoStep: () => void;
     onPrevDemoStep: () => void;
     onToggleAutoPlay: () => void;
+    selectedCell: CellType | null;
+    cytokineHistory: number[];
+    isVisible: boolean;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
@@ -45,7 +48,10 @@ const Dashboard: React.FC<DashboardProps> = ({
     onStopDemo,
     onNextDemoStep,
     onPrevDemoStep,
-    onToggleAutoPlay
+    onToggleAutoPlay,
+    selectedCell,
+    cytokineHistory,
+    isVisible
 }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'stats' | 'controls' | 'demo'>('controls');
@@ -54,6 +60,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     const legendCells = [
         CellType.SKIN,
         CellType.T_CD8,
+        CellType.T_TH17,
+        CellType.NEUTROPHIL,
         CellType.MACROPHAGE,
         CellType.DRUG,
         CellType.DENDRITIC
@@ -83,18 +91,20 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="space-y-4">
             {!demoState.isActive ? (
                 // Demo Start Screen
-                <div className="text-center space-y-4">
-                    <div className="w-20 h-20 mx-auto bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(168,85,247,0.5)]">
-                        <span className="text-4xl">🎓</span>
+                <div className="text-center space-y-2">
+                    <div className="w-12 h-12 mx-auto bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(168,85,247,0.4)]">
+                        <span className="text-2xl">🎓</span>
                     </div>
-                    <h3 className="font-orbitron text-xl text-purple-400">ОБУЧАЮЩИЙ РЕЖИМ</h3>
-                    <p className="text-sm text-slate-300 leading-relaxed">
-                        Пошаговая демонстрация аутоиммунной реакции при псориазе.
-                        Вы увидите, как иммунные клетки взаимодействуют друг с другом.
+                    <h4 className="font-orbitron text-sm text-purple-400 uppercase tracking-tighter">Обучающий режим</h4>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                        Пошаговая демонстрация иммунной реакции.
                     </p>
                     <button
-                        onClick={onStartDemo}
-                        className="w-full py-4 rounded-xl font-orbitron font-bold text-lg tracking-wider transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400 hover:from-purple-500 hover:to-pink-500 shadow-[0_0_20px_rgba(168,85,247,0.4)] active:scale-95"
+                        onClick={() => {
+                            onStartDemo();
+                            setIsMobileMenuOpen(false);
+                        }}
+                        className="w-full py-2.5 rounded-lg font-orbitron font-bold text-xs tracking-wider transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400 hover:from-purple-500 hover:to-pink-500 shadow-[0_0_15px_rgba(168,85,247,0.3)] active:scale-95"
                     >
                         🚀 НАЧАТЬ ДЕМО
                     </button>
@@ -113,10 +123,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <div
                                     key={step}
                                     className={`flex-1 h-2 rounded-full transition-all duration-300 ${index < currentStepIndex
-                                            ? 'bg-purple-500'
-                                            : index === currentStepIndex
-                                                ? 'bg-gradient-to-r from-purple-500 to-pink-500'
-                                                : 'bg-slate-700'
+                                        ? 'bg-purple-500'
+                                        : index === currentStepIndex
+                                            ? 'bg-gradient-to-r from-purple-500 to-pink-500'
+                                            : 'bg-slate-700'
                                         }`}
                                     style={index === currentStepIndex ? {
                                         background: `linear-gradient(90deg, #a855f7 ${demoState.stepProgress}%, #374151 ${demoState.stepProgress}%)`
@@ -159,8 +169,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <button
                             onClick={onToggleAutoPlay}
                             className={`px-4 py-3 rounded-lg font-bold text-sm transition-all border ${demoState.autoPlay
-                                    ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500'
-                                    : 'bg-slate-700 text-slate-300 border-slate-600'
+                                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500'
+                                : 'bg-slate-700 text-slate-300 border-slate-600'
                                 }`}
                         >
                             {demoState.autoPlay ? '⏸' : '▶'}
@@ -184,7 +194,10 @@ const Dashboard: React.FC<DashboardProps> = ({
 
                     {demoState.currentStep === DemoStep.COMPLETE && (
                         <button
-                            onClick={onStartDemo}
+                            onClick={() => {
+                                onStartDemo();
+                                setIsMobileMenuOpen(false);
+                            }}
                             className="w-full py-3 rounded-lg font-orbitron font-bold text-sm tracking-wider transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400 hover:from-purple-500 hover:to-pink-500"
                         >
                             🔄 ПОВТОРИТЬ
@@ -259,12 +272,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                 />
             </div>
 
-            <div className="pt-4 border-t border-white/5">
-                <h3 className="text-[10px] font-bold text-slate-500 uppercase mb-2">Логи системы</h3>
-                <div className="space-y-1 max-h-32 overflow-y-auto font-mono text-[10px] text-blue-300 scrollbar-hide">
+            <CytokineChart />
+
+            <div className="pt-3 border-t border-white/5">
+                <h3 className="text-[15px] font-bold text-slate-500 uppercase mb-1.5">Логи системы</h3>
+                <div className="space-y-1 max-h-28 overflow-y-auto font-mono text-[15px] text-blue-300 scrollbar-hide">
                     {state.damageReport.map((log, i) => (
-                        <div key={i} className="animate-in fade-in slide-in-from-left duration-300">
-                            [{new Date().toLocaleTimeString()}] {log}
+                        <div key={i} className="animate-in fade-in slide-in-from-left duration-300 leading-tight">
+                            [{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}] {log}
                         </div>
                     ))}
                 </div>
@@ -272,28 +287,109 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
     );
 
+    // New Helper: Cytokine Chart
+    const CytokineChart = () => (
+        <div className="mt-3 p-2 bg-black/40 border border-white/5 rounded-lg">
+            <div className="flex justify-between items-center mb-1.5">
+                <span className="text-[13px] font-orbitron text-slate-400 uppercase tracking-widest">Динамика цитокинов</span>
+                <span className="text-[13px] text-red-400 font-bold">{state.cytokineLevel}%</span>
+            </div>
+            <div className="h-12 flex items-end gap-[2px]">
+                {cytokineHistory.map((val, i) => (
+                    <div
+                        key={i}
+                        className="flex-1 bg-red-500/50 hover:bg-red-400 transition-all rounded-t-sm"
+                        style={{ height: `${val}%` }}
+                        title={`День ${i}: ${val}%`}
+                    />
+                ))}
+                {cytokineHistory.length === 0 && (
+                    <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-600 italic">
+                        Сбор данных...
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    // New Helper: Wiki Panel
+    const WikiPanel = () => {
+        if (!selectedCell) return (
+            <div className="p-2 border border-dashed border-white/10 rounded-lg text-center text-slate-500 text-[9px] italic">
+                Кликните на клетку для справки
+            </div>
+        );
+        const info = CELL_INFO[selectedCell];
+        const config = CELL_CONFIGS[selectedCell];
+        return (
+            <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl animate-in fade-in zoom-in duration-300">
+                <div className="flex items-center gap-2 mb-1.5">
+                    <div
+                        className="w-3 h-3 rounded-full shadow-[0_0_8px_currentColor]"
+                        style={{ backgroundColor: config.color, color: config.color }}
+                    />
+                    <h4 className="font-orbitron text-xs text-blue-300 uppercase">{info.title}</h4>
+                </div>
+                <div className="inline-block px-1.5 py-0.5 bg-blue-500/20 rounded text-[8px] font-bold text-blue-400 mb-1.5 uppercase tracking-tighter">
+                    Роль: {info.role}
+                </div>
+                <p className="text-[10px] text-slate-300 leading-snug">
+                    {info.description}
+                </p>
+            </div>
+        );
+    };
+
+    // New Helper: Exogenous Triggers
+    const ExogenousTriggers = () => (
+        <div className="space-y-2">
+            <span className="text-[10px] font-orbitron text-slate-400 uppercase tracking-widest">Внешние факторы</span>
+            <div className="grid grid-cols-3 gap-2">
+                {[
+                    { label: '☀️ УФ', val: 15, color: 'hover:border-yellow-400 text-yellow-500' },
+                    { label: '🦠 Инф.', val: 25, color: 'hover:border-red-400 text-red-500' },
+                    { label: '❄️ Холод', val: 10, color: 'hover:border-cyan-400 text-cyan-500' }
+                ].map(t => (
+                    <button
+                        key={t.label}
+                        onClick={() => {
+                            const newStress = Math.min(100, state.stressLevel + t.val);
+                            onSetStress(newStress);
+                            soundManager.playAlert();
+                        }}
+                        className={`py-2 rounded border border-white/10 bg-white/5 text-[10px] font-bold transition-all active:scale-95 ${t.color}`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+
     // Helper for Controls Content
     const ControlsContent = () => (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
+            <ExogenousTriggers />
+
             {/* Drug Selection Header */}
-            <div className="flex justify-between items-center mb-1">
-                <span className="text-[10px] font-orbitron text-slate-400 uppercase tracking-widest">Выбор терапии</span>
-                <span className={`text-[10px] font-orbitron font-bold uppercase ${selectedDrug === DrugType.INJECTION ? 'text-emerald-400' :
-                        selectedDrug === DrugType.PILL ? 'text-blue-400' : 'text-white'
+            <div className="flex justify-between items-center -mb-1">
+                <span className="text-[9px] font-orbitron text-slate-500 uppercase tracking-widest">Терапия</span>
+                <span className={`text-[9px] font-orbitron font-bold uppercase ${selectedDrug === DrugType.INJECTION ? 'text-emerald-400' :
+                    selectedDrug === DrugType.PILL ? 'text-blue-400' : 'text-white'
                     }`}>
                     {drugOptions.find(d => d.type === selectedDrug)?.label}
                 </span>
             </div>
 
             {/* Drug Selection Buttons */}
-            <div className="flex gap-2 p-1 bg-white/5 rounded-lg">
+            <div className="flex gap-1 p-0.5 bg-white/5 rounded-md">
                 {drugOptions.map(opt => (
                     <button
                         key={opt.type}
                         onClick={() => onSelectDrug(opt.type)}
-                        className={`flex-1 py-2 text-[10px] font-orbitron font-bold uppercase rounded border transition-all ${selectedDrug === opt.type
-                                ? `${opt.color} bg-white/10`
-                                : 'border-transparent text-slate-500 hover:text-slate-300'
+                        className={`flex-1 py-1.5 text-[9px] font-orbitron font-bold uppercase rounded transition-all ${selectedDrug === opt.type
+                            ? `${opt.color} bg-white/10`
+                            : 'border-transparent text-slate-500 hover:text-slate-300'
                             }`}
                     >
                         {opt.label}
@@ -302,7 +398,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <button
-                onClick={onInjectDrug}
+                onClick={() => {
+                    onInjectDrug();
+                    setIsMobileMenuOpen(false);
+                }}
                 className="w-full py-3 rounded-lg font-orbitron font-bold text-sm tracking-widest transition-all bg-emerald-500/20 text-emerald-400 border border-emerald-500 hover:bg-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.3)] active:scale-95"
             >
                 ПРИМЕНИТЬ ТЕРАПИЮ
@@ -311,22 +410,25 @@ const Dashboard: React.FC<DashboardProps> = ({
             <button
                 onClick={() => {
                     onToggleAlert();
-                    if (!state.isAlertActive) soundManager.playAlert();
+                    if (!state.isAlertActive) {
+                        soundManager.playAlert();
+                        setIsMobileMenuOpen(false);
+                    }
                 }}
-                className={`w-full py-3 rounded-lg font-orbitron font-bold text-sm tracking-widest transition-all ${state.isAlertActive
-                        ? 'bg-red-500/20 text-red-400 border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
-                        : 'bg-green-500/20 text-green-400 border border-green-500'
+                className={`w-full py-2 rounded-lg font-orbitron font-bold text-[10px] lg:text-[11px] tracking-widest transition-all ${state.isAlertActive
+                    ? 'bg-red-500/20 text-red-400 border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]'
+                    : 'bg-green-500/20 text-green-400 border border-green-500'
                     }`}
             >
-                {state.isAlertActive ? 'ОСТАНОВИТЬ КАСКАД' : 'ЗАПУСТИТЬ АУТОИММУННУЮ РЕАКЦИЮ'}
+                {state.isAlertActive ? 'ОСТАНОВИТЬ КАСКАД' : 'ЗАПУСТИТЬ РЕАКЦИЮ'}
             </button>
 
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
                 <button
                     onClick={onReset}
-                    className="flex-1 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold border border-slate-700 hover:bg-slate-700"
+                    className="flex-1 py-1.5 rounded-lg bg-slate-800 text-emerald-400 text-[10px] font-bold border border-slate-700 hover:bg-slate-700 uppercase tracking-tighter"
                 >
-                    СБРОС БИОМАССЫ
+                    СБРОС
                 </button>
                 <input
                     type="range"
@@ -334,60 +436,47 @@ const Dashboard: React.FC<DashboardProps> = ({
                     max="100"
                     value={state.cytokineLevel}
                     onChange={(e) => onSetCytokine(parseInt(e.target.value))}
-                    className="w-1/2 accent-red-500"
+                    className="w-1/2 accent-red-500 h-1 mt-auto mb-auto"
                 />
             </div>
         </div>
     );
 
     return (
-        <div className="fixed top-0 left-0 w-full h-full pointer-events-none z-10 flex flex-col justify-between">
+        <div className={`fixed top-0 left-0 w-full h-full pointer-events-none z-10 flex flex-col justify-between transition-all duration-500 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
 
-            {/* Demo Mode Overlay Banner */}
-            {demoState.isActive && (
-                <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto">
-                    <div className="bg-gradient-to-r from-purple-900/90 to-pink-900/90 backdrop-blur-md border border-purple-500/50 px-6 py-3 rounded-full shadow-[0_0_30px_rgba(168,85,247,0.4)] flex items-center gap-4">
-                        <div className="w-3 h-3 bg-purple-400 rounded-full animate-pulse" />
-                        <span className="font-orbitron text-sm text-purple-200 uppercase tracking-wider">
-                            Обучающий режим активен
-                        </span>
-                        <span className="font-orbitron text-xs text-pink-300">
-                            {stepInfo.title}
-                        </span>
-                    </div>
-                </div>
-            )}
+            {/* Dashboard and Control UI Container */}
 
             {/* Top Bar: Legend & Time Control (Responsive) */}
             <div className="absolute top-4 left-0 w-full flex justify-center pointer-events-auto z-50 px-2 sm:px-8">
-                <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 bg-black/60 backdrop-blur-md border border-white/10 px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-full shadow-lg max-w-[95vw] sm:max-w-none overflow-hidden">
+                <div className="flex flex-col lg:flex-row items-center gap-2 lg:gap-4 bg-black/70 backdrop-blur-xl border border-white/10 px-4 py-2 lg:py-3 rounded-2xl lg:rounded-full shadow-2xl max-w-[98vw] lg:max-w-none">
                     {/* Time Controls */}
-                    <div className="flex items-center gap-2 sm:gap-3 border-b sm:border-b-0 sm:border-r border-white/20 pb-2 sm:pb-0 sm:pr-4 sm:mr-2 w-full sm:w-auto justify-between sm:justify-start">
-                        <span className="font-orbitron text-lg sm:text-xl font-bold text-amber-400 whitespace-nowrap">ДЕНЬ {timeState.day}</span>
-                        <div className="flex bg-white/10 rounded-lg p-1 gap-1">
+                    <div className="flex items-center gap-2 lg:gap-3 border-b lg:border-b-0 lg:border-r border-white/20 pb-2 lg:pb-0 lg:pr-4 lg:mr-2 w-full lg:w-auto justify-between lg:justify-start">
+                        <span className="font-orbitron text-sm lg:text-xl font-bold text-amber-400 whitespace-nowrap">ДЕНЬ {timeState.day}</span>
+                        <div className="flex bg-white/10 rounded-lg p-0.5 lg:p-1 gap-1">
                             <button
                                 onClick={() => onTimeChange({ isPaused: !timeState.isPaused })}
-                                className={`w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 transition-colors ${timeState.isPaused ? 'text-yellow-400' : 'text-white'}`}
+                                className={`w-7 h-7 lg:w-9 lg:h-9 flex items-center justify-center rounded hover:bg-white/10 transition-colors ${timeState.isPaused ? 'text-yellow-400' : 'text-white'}`}
                             >
                                 {timeState.isPaused ? '▶' : '⏸'}
                             </button>
-                            <div className="hidden sm:flex gap-1">
-                                <button onClick={() => onTimeChange({ timeScale: 0.5 })} className={`px-2 h-8 rounded text-xs font-bold hover:bg-white/10 ${timeState.timeScale === 0.5 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>0.5x</button>
-                                <button onClick={() => onTimeChange({ timeScale: 1.0 })} className={`px-2 h-8 rounded text-xs font-bold hover:bg-white/10 ${timeState.timeScale === 1.0 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>1x</button>
-                                <button onClick={() => onTimeChange({ timeScale: 2.0 })} className={`px-2 h-8 rounded text-xs font-bold hover:bg-white/10 ${timeState.timeScale === 2.0 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>2x</button>
+                            <div className="flex gap-1">
+                                <button onClick={() => onTimeChange({ timeScale: 0.5 })} className={`px-1.5 lg:px-2 h-7 lg:h-9 rounded text-[10px] font-bold hover:bg-white/10 ${timeState.timeScale === 0.5 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>0.5x</button>
+                                <button onClick={() => onTimeChange({ timeScale: 1.0 })} className={`px-1.5 lg:px-2 h-7 lg:h-9 rounded text-[10px] font-bold hover:bg-white/10 ${timeState.timeScale === 1.0 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>1x</button>
+                                <button onClick={() => onTimeChange({ timeScale: 2.0 })} className={`px-1.5 lg:px-2 h-7 lg:h-9 rounded text-[10px] font-bold hover:bg-white/10 ${timeState.timeScale === 2.0 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>2x</button>
                             </div>
                         </div>
                     </div>
 
                     {/* Legend (Hidden on very small screens, scrollable or simplified) */}
-                    <div className="flex flex-wrap justify-center gap-2 sm:gap-4 overflow-x-auto max-w-full pb-1 sm:pb-0 scrollbar-hide">
+                    <div className="flex flex-wrap justify-center gap-2 lg:gap-4 overflow-x-auto max-w-full pb-1 lg:pb-0 scrollbar-hide">
                         {legendCells.map(type => (
-                            <div key={type} className="flex items-center gap-1 sm:gap-2 shrink-0">
+                            <div key={type} className="flex items-center gap-1 lg:gap-2 shrink-0">
                                 <div
-                                    className="w-2 h-2 sm:w-3 sm:h-3 rounded-full shadow-[0_0_10px_currentColor]"
+                                    className="w-2 h-2 lg:w-3 lg:h-3 rounded-full shadow-[0_0_8px_currentColor]"
                                     style={{ backgroundColor: CELL_CONFIGS[type].color, color: CELL_CONFIGS[type].color }}
                                 />
-                                <span className="text-[8px] sm:text-[10px] font-orbitron text-slate-300 uppercase tracking-widest">
+                                <span className="text-[8px] lg:text-[10px] font-orbitron text-slate-300 uppercase tracking-widest whitespace-nowrap">
                                     {CELL_CONFIGS[type].label || type}
                                 </span>
                             </div>
@@ -397,36 +486,42 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {/* DESKTOP LAYOUT (Hidden on Mobile) */}
-            <div className="hidden md:flex justify-between w-full h-full p-6 mt-16">
-                {/* Left Panel: Stats */}
-                <div className="w-80 h-fit bg-black/40 backdrop-blur-md border border-white/10 p-4 rounded-xl pointer-events-auto">
-                    <h2 className="font-orbitron text-xl text-blue-400 mb-4 tracking-wider flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
-                        СТАТУС_СИСТЕМЫ
-                    </h2>
-                    <StatsContent />
-                </div>
+            <div className="hidden md:flex justify-between w-full h-full p-4 lg:p-6 mt-20 lg:mt-24">
+                {/* Left Panel: Stats - Hidden during demo steps */}
+                {!demoState.isActive ? (
+                    <div className="w-72 lg:w-80 max-h-[calc(100vh-140px)] overflow-y-auto bg-black/40 backdrop-blur-xl border border-white/10 p-3 lg:p-4 rounded-xl pointer-events-auto scrollbar-hide">
+                        <h2 className="font-orbitron text-md lg:text-lg text-blue-400 mb-3 tracking-wider flex items-center gap-2 underline underline-offset-8 decoration-blue-500/30">
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+                            СТАТУС_СИСТЕМЫ
+                        </h2>
+                        <StatsContent />
+                    </div>
+                ) : <div className="w-72 lg:w-80" />}
 
                 {/* Right Panel: Controls, Demo & Narrative */}
-                <div className="flex flex-col justify-end items-end gap-4 w-96 pb-6">
-                    {/* Demo Panel */}
-                    <div className="bg-black/40 backdrop-blur-md border border-purple-500/30 p-4 rounded-xl pointer-events-auto w-full">
-                        <h2 className="font-orbitron text-lg text-purple-400 mb-3 tracking-wider flex items-center gap-2">
-                            <span className="text-xl">🎓</span>
-                            ДЕМО_РЕЖИМ
-                        </h2>
+                <div className="flex flex-col items-end gap-1.5 lg:gap-2 w-[300px] lg:w-[350px] max-h-[calc(100vh-140px)] overflow-y-auto pointer-events-auto scrollbar-hide pr-1">
+                    {/* Demo Panel - Always visible during demo */}
+                    <div className="bg-black/60 backdrop-blur-xl border border-purple-500/50 p-2.5 lg:p-4 rounded-xl w-full shadow-[0_0_20px_rgba(168,85,247,0.2)]">
+                        <h3 className="font-orbitron text-[11px] lg:text-xs text-purple-400 mb-1.5 tracking-wider flex items-center gap-2">
+                            <span className="text-base">🎓</span>
+                            ИНСТРУКЦИЯ ДЕМО
+                        </h3>
                         <DemoPanel />
                     </div>
 
                     {!demoState.isActive && (
                         <>
-                            <div className="bg-black/40 backdrop-blur-md border border-white/10 p-4 rounded-xl pointer-events-auto w-full">
-                                <h2 className="font-orbitron text-lg text-amber-400 mb-2 tracking-wider">МИКРО_НАРРАТИВ</h2>
-                                <p className="text-sm text-slate-200 leading-relaxed italic">
+                            <div className="bg-black/40 backdrop-blur-xl border border-white/10 p-2 lg:p-2.5 rounded-lg w-full">
+                                <h2 className="font-orbitron text-[9px] lg:text-[10px] text-blue-400 mb-1 tracking-wider uppercase">БИБЛИОТЕКА</h2>
+                                <WikiPanel />
+                            </div>
+                            <div className="bg-black/40 backdrop-blur-xl border border-white/10 p-2 lg:p-2.5 rounded-lg w-full">
+                                <h2 className="font-orbitron text-[9px] lg:text-[10px] text-amber-400 mb-0.5 tracking-wider uppercase">НАРРАТИВ</h2>
+                                <p className="text-[9px] lg:text-[11px] text-slate-300 leading-snug italic line-clamp-2">
                                     "{narrative}"
                                 </p>
                             </div>
-                            <div className="bg-black/40 backdrop-blur-md border border-white/10 p-4 rounded-xl pointer-events-auto w-full">
+                            <div className="bg-black/40 backdrop-blur-xl border border-white/10 p-2 lg:p-3 rounded-lg w-full">
                                 <ControlsContent />
                             </div>
                         </>
@@ -451,8 +546,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <button
                         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                         className={`flex items-center gap-2 px-6 py-3 rounded-full font-orbitron font-bold shadow-lg border transition-all ${isMobileMenuOpen
-                                ? 'bg-red-500 text-white border-red-400'
-                                : 'bg-blue-600 text-white border-blue-400 animate-bounce-slow'
+                            ? 'bg-red-500 text-white border-red-400'
+                            : 'bg-blue-600 text-white border-blue-400 animate-bounce-slow'
                             }`}
                     >
                         {isMobileMenuOpen ? 'ЗАКРЫТЬ' : 'ПАНЕЛЬ УПРАВЛЕНИЯ'}
@@ -500,6 +595,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="space-y-6">
                                     <div className="bg-white/5 p-4 rounded-xl">
                                         <StatsContent />
+                                    </div>
+                                    <div className="bg-white/5 p-4 rounded-xl">
+                                        <h2 className="font-orbitron text-xs text-blue-400 mb-2 uppercase">БИБЛИОТЕКА</h2>
+                                        <WikiPanel />
                                     </div>
                                 </div>
                             )}

@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import MicroCanvas from './components/MicroCanvas';
 import Dashboard from './components/Dashboard';
-import { SimulationState, DrugType, DemoState, DemoStep, DEMO_STEP_INFO } from './types';
+import { SimulationState, CellType, DrugType, DemoState, DemoStep, DEMO_STEP_INFO } from './types';
 import { getDramaticNarrative } from './geminiService';
 import { PSORIASIS_STAGES } from './constants';
+import { soundManager } from './utils/audio';
 
 const App: React.FC = () => {
   const [state, setState] = useState<SimulationState>({
@@ -30,6 +31,44 @@ const App: React.FC = () => {
     autoPlay: true,
     focusTarget: null
   });
+
+  const [selectedCell, setSelectedCell] = useState<CellType | null>(null);
+  const [cytokineHistory, setCytokineHistory] = useState<number[]>([]);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [isUIVisible, setIsUIVisible] = useState(true);
+
+  // Initialize Background Music status
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      soundManager.startMusicIfPossible();
+      setIsMusicPlaying(soundManager.getMusicStatus());
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'h') {
+        setIsUIVisible(prev => !prev);
+      }
+    };
+
+    window.addEventListener('click', handleFirstInteraction);
+    window.addEventListener('keydown', handleFirstInteraction);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const toggleMusic = async () => {
+    const status = await soundManager.toggleMusic();
+    setIsMusicPlaying(!!status);
+  };
+
+  const toggleUI = () => setIsUIVisible(prev => !prev);
 
   // Demo Mode Step Progression
   const DEMO_STEP_ORDER: DemoStep[] = [
@@ -138,6 +177,7 @@ const App: React.FC = () => {
 
       interval = window.setInterval(() => {
         setTimeState(prev => ({ ...prev, day: prev.day + 1 }));
+        setCytokineHistory(prev => [...prev.slice(-49), state.cytokineLevel]);
 
         // Stress Logic: High stress increases cytokines slowly
         setState(prev => {
@@ -250,6 +290,13 @@ const App: React.FC = () => {
     setDemoState(prev => ({ ...prev, focusTarget: target }));
   };
 
+  const handleLogEvent = useCallback((msg: string) => {
+    setState(prev => ({
+      ...prev,
+      damageReport: [msg, ...prev.damageReport.slice(0, 10)]
+    }));
+  }, []);
+
   return (
     <div className="relative w-screen h-screen bg-[#050505] text-white overflow-hidden">
       <div className="absolute inset-0 bg-radial-gradient from-[#1a1c2c] to-[#050505] opacity-50" />
@@ -265,6 +312,9 @@ const App: React.FC = () => {
         isPaused={timeState.isPaused}
         demoState={demoState}
         onDemoFocusUpdate={handleDemoFocusUpdate}
+        onCellClick={setSelectedCell}
+        isUIVisible={isUIVisible}
+        onLogEvent={handleLogEvent}
       />
 
       <Dashboard
@@ -274,6 +324,9 @@ const App: React.FC = () => {
         narrative={narrative}
         selectedDrug={selectedDrug}
         demoState={demoState}
+        selectedCell={selectedCell}
+        cytokineHistory={cytokineHistory}
+        isVisible={isUIVisible}
         onToggleAlert={handleToggleAlert}
         onReset={handleReset}
         onSetCytokine={(val) => setState(prev => ({ ...prev, cytokineLevel: val }))}
@@ -291,6 +344,34 @@ const App: React.FC = () => {
 
       <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-black to-transparent pointer-events-none" />
       <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-50 bg-[length:100%_2px,3px_100%]" />
+
+      {/* UI Toggle Button */}
+      <button
+        onClick={toggleUI}
+        className="fixed top-6 right-20 z-[60] w-12 h-12 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-xl transition-all hover:bg-white/10 hover:scale-110 active:scale-95 shadow-lg group"
+        title={isUIVisible ? "Скрыть интерфейс (H)" : "Показать интерфейс (H)"}
+      >
+        <span>
+          {isUIVisible ? '👁️' : '🙈'}
+        </span>
+        <div className="absolute -bottom-10 right-0 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none font-orbitron border border-white/5">
+          ИНТЕРФЕЙС: {isUIVisible ? 'ПОКАЗАТЬ' : 'СКРЫТЬ'} (H)
+        </div>
+      </button>
+
+      {/* Background Music Toggle */}
+      <button
+        onClick={toggleMusic}
+        className="fixed top-6 right-6 z-[60] w-12 h-12 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-xl transition-all hover:bg-white/10 hover:scale-110 active:scale-95 shadow-lg group"
+        title={isMusicPlaying ? "Выключить музыку" : "Включить музыку"}
+      >
+        <span className={isMusicPlaying ? "animate-pulse" : "opacity-50"}>
+          {isMusicPlaying ? '🔊' : '🔈'}
+        </span>
+        <div className="absolute -bottom-10 right-0 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none font-orbitron border border-white/5">
+          МУЗЫКА: {isMusicPlaying ? 'ВКЛ' : 'ВЫКЛ'}
+        </div>
+      </button>
     </div>
   );
 };
